@@ -4,7 +4,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 
 class User(BaseModel):
-    name: str
+    nome: str
     email: EmailStr
     password: str
     card_id: Optional[str] = None
