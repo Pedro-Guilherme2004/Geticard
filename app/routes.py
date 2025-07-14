@@ -21,8 +21,8 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '
 dynamodb = boto3.resource(
     'dynamodb',
     region_name=Config.AWS_REGION,
-    aws_access_key_id=os.getenv("AKIARI22QTZIH7OEW4GC"),
-    aws_secret_access_key=os.getenv("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")
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
 )
 users_table = dynamodb.Table("GetiCardUsers")
 cards_table = dynamodb.Table("Testecard")  # Ou "GetiCardCards" se preferir
@@ -142,7 +142,7 @@ def update_card(card_id):
             return jsonify({"error": "Cartão não encontrado"}), 404
 
         # Atualiza os campos permitidos (ajuste conforme sua modelagem!)
-        campos_editaveis = ["nome", "biografia", "empresa", "telefone", "emailContato", "foto_perfil"]
+        campos_editaveis = ["nome", "biografia", "empresa", "whatsapp", "emailContato", "foto_perfil"]
         for campo in campos_editaveis:
             if campo in data:
                 card[campo] = data[campo]
