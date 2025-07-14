@@ -152,6 +152,23 @@ def update_card(card_id):
     except Exception as e:
         print("Erro ao atualizar cartão:", e)
         return jsonify({"error": str(e)}), 500
+    
+@routes.route("/card/<card_id>", methods=["DELETE"])
+def delete_card(card_id):
+    try:
+        # Busca o cartão
+        response = cards_table.get_item(Key={"card_id": card_id})
+        card = response.get("Item")
+        if not card:
+            return jsonify({"error": "Cartão não encontrado"}), 404
+
+        # Exclui do DynamoDB
+        cards_table.delete_item(Key={"card_id": card_id})
+        return jsonify({"message": "Cartão excluído com sucesso"}), 200
+    except Exception as e:
+        print("Erro ao excluir cartão:", e)
+        return jsonify({"error": str(e)}), 500
+
 
 # ------------------ UPLOADS ------------------
 @routes.route("/uploads/<path:filename>")
