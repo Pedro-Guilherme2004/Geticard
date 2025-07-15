@@ -8,9 +8,7 @@ from datetime import datetime, timedelta
 from boto3.dynamodb.conditions import Attr
 import boto3
 import uuid
-from app.services import (
-    hash_password,
-)
+from app.services import hash_password
 from app.services.aws_s3_utils import upload_to_s3
 from app.config import Config
 import os
