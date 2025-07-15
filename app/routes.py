@@ -83,34 +83,88 @@ def login():
 @routes.route("/card", methods=["POST"])
 def create_card():
     try:
-        data = request.json
+        if request.content_type and request.content_type.startswith("multipart/form-data"):
+            # Recebe arquivo e campos do form
+            form = request.form
+            files = request.files
+            # Verifica se já existe cartão para este emailContato
+            emailContato = form.get("emailContato")
+            if not emailContato:
+                return jsonify({"error": "Email para contato obrigatório!"}), 400
+            resp = cards_table.scan(
+                FilterExpression=Attr('emailContato').eq(emailContato)
+            )
+            if resp.get('Items'):
+                card_existente = resp['Items'][0]
+                return jsonify({
+                    "message": "Já existe um cartão para este email.",
+                    "card_id": card_existente["card_id"]
+                }), 200
 
-        # Email de contato deve ser obrigatório
-        emailContato = data.get("emailContato")
-        if not emailContato:
-            return jsonify({"error": "Email para contato obrigatório!"}), 400
+            card_id = f"card-{uuid.uuid4().hex[:8]}"
+            # Salva foto_perfil
+            foto_perfil_filename = ""
+            if "foto_perfil" in files and files["foto_perfil"]:
+                avatar = files["foto_perfil"]
+                ext = avatar.filename.rsplit(".", 1)[-1].lower()
+                avatar_filename = f"{card_id}_avatar.{ext}"
+                avatar_path = os.path.join(UPLOAD_FOLDER, avatar_filename)
+                avatar.save(avatar_path)
+                foto_perfil_filename = f"/uploads/{avatar_filename}"
 
-        # Verifica se já existe cartão para este emailContato
-        resp = cards_table.scan(
-            FilterExpression=Attr('emailContato').eq(emailContato)
-        )
-        if resp.get('Items'):
-            card_existente = resp['Items'][0]
-            return jsonify({
-                "message": "Já existe um cartão para este email.",
-                "card_id": card_existente["card_id"]
-            }), 200
+            # Salva galeria
+            galeria_filenames = []
+            galeria_files = request.files.getlist("galeria")
+            for idx, img in enumerate(galeria_files):
+                ext = img.filename.rsplit(".", 1)[-1].lower()
+                gallery_filename = f"{card_id}_gallery{idx}.{ext}"
+                gallery_path = os.path.join(UPLOAD_FOLDER, gallery_filename)
+                img.save(gallery_path)
+                galeria_filenames.append(f"/uploads/{gallery_filename}")
 
-        # Criação do cartão
-        card_id = f"card-{uuid.uuid4().hex[:8]}"
-        card = Card(**data)
-        card_dict = card.dict()
-        card_dict["card_id"] = card_id
+            # Monta o dict do cartão (só pega campos previstos)
+            card_dict = {
+                "card_id": card_id,
+                "nome": form.get("nome"),
+                "biografia": form.get("biografia"),
+                "empresa": form.get("empresa"),
+                "whatsapp": form.get("whatsapp"),
+                "emailContato": emailContato,
+                "instagram": form.get("instagram"),
+                "linkedin": form.get("linkedin"),
+                "site": form.get("site"),
+                "chave_pix": form.get("chave_pix"),
+                "foto_perfil": foto_perfil_filename,
+                "galeria": galeria_filenames,
+            }
+            # Remove valores None
+            card_dict = {k: v for k, v in card_dict.items() if v is not None}
+            cards_table.put_item(Item=card_dict)
+            return jsonify({"message": "Cartão criado com sucesso", "card_id": card_id}), 201
+        else:
+            # Fallback para JSON (compatibilidade antiga)
+            data = request.json
+            emailContato = data.get("emailContato")
+            if not emailContato:
+                return jsonify({"error": "Email para contato obrigatório!"}), 400
 
-        if card.foto_perfil:
-            card_dict["foto_perfil"] = salvar_imagem_local(card.foto_perfil, card_id)
-        cards_table.put_item(Item=card_dict)
-        return jsonify({"message": "Cartão criado com sucesso", "card_id": card_id}), 201
+            # Verifica se já existe cartão para este emailContato
+            resp = cards_table.scan(
+                FilterExpression=Attr('emailContato').eq(emailContato)
+            )
+            if resp.get('Items'):
+                card_existente = resp['Items'][0]
+                return jsonify({
+                    "message": "Já existe um cartão para este email.",
+                    "card_id": card_existente["card_id"]
+                }), 200
+
+            card_id = f"card-{uuid.uuid4().hex[:8]}"
+            card = Card(**data)
+            card_dict = card.dict()
+            card_dict["card_id"] = card_id
+            cards_table.put_item(Item=card_dict)
+            return jsonify({"message": "Cartão criado com sucesso", "card_id": card_id}), 201
 
     except ValidationError as e:
         return jsonify(e.errors()), 400
@@ -129,46 +183,81 @@ def get_card(card_id):
         return jsonify(item), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
 
+# ------------------ UPDATE CARD ------------------
 @routes.route("/card/<card_id>", methods=["PUT"])
 def update_card(card_id):
     try:
-        data = request.json
-        # Busca o cartão pelo ID
-        response = cards_table.get_item(Key={"card_id": card_id})
-        card = response.get("Item")
-        if not card:
-            return jsonify({"error": "Cartão não encontrado"}), 404
+        if request.content_type and request.content_type.startswith("multipart/form-data"):
+            form = request.form
+            files = request.files
 
-        # Atualiza os campos permitidos (ajuste conforme sua modelagem!)
-        campos_editaveis = ["nome", "biografia", "empresa", "whatsapp", "emailContato", "foto_perfil"]
-        for campo in campos_editaveis:
-            if campo in data:
-                card[campo] = data[campo]
+            response = cards_table.get_item(Key={"card_id": card_id})
+            card = response.get("Item")
+            if not card:
+                return jsonify({"error": "Cartão não encontrado"}), 404
 
-        cards_table.put_item(Item=card)
-        return jsonify({"message": "Cartão atualizado com sucesso"}), 200
+            # Atualiza os campos
+            campos_editaveis = ["nome", "biografia", "empresa", "whatsapp", "emailContato", "instagram", "linkedin", "site", "chave_pix"]
+            for campo in campos_editaveis:
+                if campo in form:
+                    card[campo] = form.get(campo)
+            # Foto perfil
+            if "foto_perfil" in files and files["foto_perfil"]:
+                avatar = files["foto_perfil"]
+                ext = avatar.filename.rsplit(".", 1)[-1].lower()
+                avatar_filename = f"{card_id}_avatar.{ext}"
+                avatar_path = os.path.join(UPLOAD_FOLDER, avatar_filename)
+                avatar.save(avatar_path)
+                card["foto_perfil"] = f"/uploads/{avatar_filename}"
+
+            # Galeria
+            galeria_filenames = []
+            galeria_files = request.files.getlist("galeria")
+            for idx, img in enumerate(galeria_files):
+                ext = img.filename.rsplit(".", 1)[-1].lower()
+                gallery_filename = f"{card_id}_gallery{idx}.{ext}"
+                gallery_path = os.path.join(UPLOAD_FOLDER, gallery_filename)
+                img.save(gallery_path)
+                galeria_filenames.append(f"/uploads/{gallery_filename}")
+            if galeria_filenames:
+                card["galeria"] = galeria_filenames
+
+            cards_table.put_item(Item=card)
+            return jsonify({"message": "Cartão atualizado com sucesso"}), 200
+        else:
+            # Fallback para JSON (compatibilidade antiga)
+            data = request.json
+            response = cards_table.get_item(Key={"card_id": card_id})
+            card = response.get("Item")
+            if not card:
+                return jsonify({"error": "Cartão não encontrado"}), 404
+
+            campos_editaveis = ["nome", "biografia", "empresa", "whatsapp", "emailContato", "instagram", "linkedin", "site", "chave_pix", "foto_perfil", "galeria"]
+            for campo in campos_editaveis:
+                if campo in data:
+                    card[campo] = data[campo]
+
+            cards_table.put_item(Item=card)
+            return jsonify({"message": "Cartão atualizado com sucesso"}), 200
     except Exception as e:
         print("Erro ao atualizar cartão:", e)
         return jsonify({"error": str(e)}), 500
-    
+
+# ------------------ DELETE CARD ------------------
 @routes.route("/card/<card_id>", methods=["DELETE"])
 def delete_card(card_id):
     try:
-        # Busca o cartão
         response = cards_table.get_item(Key={"card_id": card_id})
         card = response.get("Item")
         if not card:
             return jsonify({"error": "Cartão não encontrado"}), 404
 
-        # Exclui do DynamoDB
         cards_table.delete_item(Key={"card_id": card_id})
         return jsonify({"message": "Cartão excluído com sucesso"}), 200
     except Exception as e:
         print("Erro ao excluir cartão:", e)
         return jsonify({"error": str(e)}), 500
-
 
 # ------------------ UPLOADS ------------------
 @routes.route("/uploads/<path:filename>")
