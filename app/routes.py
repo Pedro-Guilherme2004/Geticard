@@ -9,7 +9,6 @@ from boto3.dynamodb.conditions import Attr
 import boto3
 import uuid
 from app.services_utils import hash_password
-from app.services.aws_s3_utils import upload_to_s3
 from app.config import Config
 import os
 
@@ -28,6 +27,13 @@ cards_table = dynamodb.Table("Testecard")  # Ou "GetiCardCards" se preferir
 routes = Blueprint("api", __name__)
 SECRET_KEY = Config.SECRET_KEY
 
+# ------- Função utilitária para salvar imagens local -------
+def salvar_imagem_local(file, filename):
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(filepath)
+    return f"/uploads/{filename}"
+
 # ------------------ REGISTRO USUÁRIO ------------------
 @routes.route("/register", methods=["POST"])
 def register():
@@ -37,7 +43,6 @@ def register():
         user_dict = user.dict()
         user_dict["password"] = hash_password(user_dict["password"])
 
-        # Verifica se já existe usuário com esse e-mail
         if users_table.get_item(Key={"email": user_dict["email"]}).get("Item"):
             return jsonify({"error": "Usuário já existe"}), 409
 
@@ -57,7 +62,6 @@ def login():
     email = data.get("email")
     password = data.get("password")
 
-    # Busca usuário na tabela de usuários
     resp = users_table.get_item(Key={"email": email})
     user = resp.get("Item")
     if not user:
@@ -70,7 +74,6 @@ def login():
         "exp": datetime.utcnow() + timedelta(minutes=15)
     }, SECRET_KEY, algorithm="HS256")
 
-    # Busca cartão associado ao emailContato do usuário (importante: emailContato, não email de login)
     card_resp = cards_table.scan(FilterExpression=Attr('emailContato').eq(email))
     cards = card_resp.get('Items', [])
     card_id = cards[0]["card_id"] if cards else None
@@ -100,23 +103,21 @@ def create_card():
 
             card_id = f"card-{uuid.uuid4().hex[:8]}"
 
-            # Upload foto_perfil para S3
-            foto_perfil_url = ""
+            # Salvar foto_perfil em local
+            foto_perfil_filename = ""
             if "foto_perfil" in files and files["foto_perfil"]:
                 avatar = files["foto_perfil"]
                 ext = avatar.filename.rsplit(".", 1)[-1].lower()
                 avatar_filename = f"{card_id}_avatar.{ext}"
-                foto_perfil_url = upload_to_s3(avatar, avatar_filename, avatar.content_type)
+                foto_perfil_filename = salvar_imagem_local(avatar, avatar_filename)
 
-            # Upload galeria para S3
+            # Salvar galeria em local
             galeria_filenames = []
             galeria_files = request.files.getlist("galeria")
             for idx, img in enumerate(galeria_files):
                 ext = img.filename.rsplit(".", 1)[-1].lower()
                 gallery_filename = f"{card_id}_gallery{idx}.{ext}"
-                url = upload_to_s3(img, gallery_filename, img.content_type)
-                if url:
-                    galeria_filenames.append(url)
+                galeria_filenames.append(salvar_imagem_local(img, gallery_filename))
 
             card_dict = {
                 "card_id": card_id,
@@ -129,7 +130,7 @@ def create_card():
                 "linkedin": form.get("linkedin"),
                 "site": form.get("site"),
                 "chave_pix": form.get("chave_pix"),
-                "foto_perfil": foto_perfil_url,
+                "foto_perfil": foto_perfil_filename,
                 "galeria": galeria_filenames,
             }
             card_dict = {k: v for k, v in card_dict.items() if v is not None}
@@ -193,23 +194,20 @@ def update_card(card_id):
             for campo in campos_editaveis:
                 if campo in form:
                     card[campo] = form.get(campo)
-            # Atualiza foto_perfil (S3)
+            # Atualiza foto_perfil em local
             if "foto_perfil" in files and files["foto_perfil"]:
                 avatar = files["foto_perfil"]
                 ext = avatar.filename.rsplit(".", 1)[-1].lower()
                 avatar_filename = f"{card_id}_avatar.{ext}"
-                foto_perfil_url = upload_to_s3(avatar, avatar_filename, avatar.content_type)
-                card["foto_perfil"] = foto_perfil_url
+                card["foto_perfil"] = salvar_imagem_local(avatar, avatar_filename)
 
-            # Atualiza galeria (S3)
+            # Atualiza galeria
             galeria_filenames = []
             galeria_files = request.files.getlist("galeria")
             for idx, img in enumerate(galeria_files):
                 ext = img.filename.rsplit(".", 1)[-1].lower()
                 gallery_filename = f"{card_id}_gallery{idx}.{ext}"
-                url = upload_to_s3(img, gallery_filename, img.content_type)
-                if url:
-                    galeria_filenames.append(url)
+                galeria_filenames.append(salvar_imagem_local(img, gallery_filename))
             if galeria_filenames:
                 card["galeria"] = galeria_filenames
 
