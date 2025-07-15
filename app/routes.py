@@ -10,8 +10,8 @@ import boto3
 import uuid
 from app.services import (
     hash_password,
-    salvar_imagem_local,
 )
+from app.services.aws_s3_utils import upload_to_s3
 from app.config import Config
 import os
 
@@ -84,10 +84,9 @@ def login():
 def create_card():
     try:
         if request.content_type and request.content_type.startswith("multipart/form-data"):
-            # Recebe arquivo e campos do form
             form = request.form
             files = request.files
-            # Verifica se já existe cartão para este emailContato
+
             emailContato = form.get("emailContato")
             if not emailContato:
                 return jsonify({"error": "Email para contato obrigatório!"}), 400
@@ -102,27 +101,25 @@ def create_card():
                 }), 200
 
             card_id = f"card-{uuid.uuid4().hex[:8]}"
-            # Salva foto_perfil
-            foto_perfil_filename = ""
+
+            # Upload foto_perfil para S3
+            foto_perfil_url = ""
             if "foto_perfil" in files and files["foto_perfil"]:
                 avatar = files["foto_perfil"]
                 ext = avatar.filename.rsplit(".", 1)[-1].lower()
                 avatar_filename = f"{card_id}_avatar.{ext}"
-                avatar_path = os.path.join(UPLOAD_FOLDER, avatar_filename)
-                avatar.save(avatar_path)
-                foto_perfil_filename = f"/uploads/{avatar_filename}"
+                foto_perfil_url = upload_to_s3(avatar, avatar_filename, avatar.content_type)
 
-            # Salva galeria
+            # Upload galeria para S3
             galeria_filenames = []
             galeria_files = request.files.getlist("galeria")
             for idx, img in enumerate(galeria_files):
                 ext = img.filename.rsplit(".", 1)[-1].lower()
                 gallery_filename = f"{card_id}_gallery{idx}.{ext}"
-                gallery_path = os.path.join(UPLOAD_FOLDER, gallery_filename)
-                img.save(gallery_path)
-                galeria_filenames.append(f"/uploads/{gallery_filename}")
+                url = upload_to_s3(img, gallery_filename, img.content_type)
+                if url:
+                    galeria_filenames.append(url)
 
-            # Monta o dict do cartão (só pega campos previstos)
             card_dict = {
                 "card_id": card_id,
                 "nome": form.get("nome"),
@@ -134,21 +131,18 @@ def create_card():
                 "linkedin": form.get("linkedin"),
                 "site": form.get("site"),
                 "chave_pix": form.get("chave_pix"),
-                "foto_perfil": foto_perfil_filename,
+                "foto_perfil": foto_perfil_url,
                 "galeria": galeria_filenames,
             }
-            # Remove valores None
             card_dict = {k: v for k, v in card_dict.items() if v is not None}
             cards_table.put_item(Item=card_dict)
             return jsonify({"message": "Cartão criado com sucesso", "card_id": card_id}), 201
         else:
-            # Fallback para JSON (compatibilidade antiga)
+            # Fallback para JSON (igual antes)
             data = request.json
             emailContato = data.get("emailContato")
             if not emailContato:
                 return jsonify({"error": "Email para contato obrigatório!"}), 400
-
-            # Verifica se já existe cartão para este emailContato
             resp = cards_table.scan(
                 FilterExpression=Attr('emailContato').eq(emailContato)
             )
@@ -197,36 +191,34 @@ def update_card(card_id):
             if not card:
                 return jsonify({"error": "Cartão não encontrado"}), 404
 
-            # Atualiza os campos
             campos_editaveis = ["nome", "biografia", "empresa", "whatsapp", "emailContato", "instagram", "linkedin", "site", "chave_pix"]
             for campo in campos_editaveis:
                 if campo in form:
                     card[campo] = form.get(campo)
-            # Foto perfil
+            # Atualiza foto_perfil (S3)
             if "foto_perfil" in files and files["foto_perfil"]:
                 avatar = files["foto_perfil"]
                 ext = avatar.filename.rsplit(".", 1)[-1].lower()
                 avatar_filename = f"{card_id}_avatar.{ext}"
-                avatar_path = os.path.join(UPLOAD_FOLDER, avatar_filename)
-                avatar.save(avatar_path)
-                card["foto_perfil"] = f"/uploads/{avatar_filename}"
+                foto_perfil_url = upload_to_s3(avatar, avatar_filename, avatar.content_type)
+                card["foto_perfil"] = foto_perfil_url
 
-            # Galeria
+            # Atualiza galeria (S3)
             galeria_filenames = []
             galeria_files = request.files.getlist("galeria")
             for idx, img in enumerate(galeria_files):
                 ext = img.filename.rsplit(".", 1)[-1].lower()
                 gallery_filename = f"{card_id}_gallery{idx}.{ext}"
-                gallery_path = os.path.join(UPLOAD_FOLDER, gallery_filename)
-                img.save(gallery_path)
-                galeria_filenames.append(f"/uploads/{gallery_filename}")
+                url = upload_to_s3(img, gallery_filename, img.content_type)
+                if url:
+                    galeria_filenames.append(url)
             if galeria_filenames:
                 card["galeria"] = galeria_filenames
 
             cards_table.put_item(Item=card)
             return jsonify({"message": "Cartão atualizado com sucesso"}), 200
         else:
-            # Fallback para JSON (compatibilidade antiga)
+            # Fallback para JSON (igual antes)
             data = request.json
             response = cards_table.get_item(Key={"card_id": card_id})
             card = response.get("Item")
