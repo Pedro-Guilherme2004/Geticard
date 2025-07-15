@@ -5,8 +5,10 @@ from app.routes import routes
 import os
 
 app = Flask(__name__)
-CORS(app)
-app.register_blueprint(routes, url_prefix="/api")
+CORS(app, origins=[
+    "https://frontend-s52u.vercel.app",
+    "https://frontend-8zw6.onrender.com"
+], supports_credentials=True)
 
 # Rota para servir uploads:
 @app.route("/uploads/<path:filename>")
