@@ -12,6 +12,7 @@ from app.services_utils import hash_password
 from app.config import Config
 import os
 
+
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads')
 
 # Conexão com DynamoDB
@@ -33,6 +34,23 @@ def salvar_imagem_local(file, filename):
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     file.save(filepath)
     return f"/uploads/{filename}"
+
+# --------------- AUTH DECORATOR -----------------
+from functools import wraps
+def token_required(f):
+    @wraps(f)
+    def decorator(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            return jsonify({'error': 'Token ausente'}), 401
+        try:
+            token = auth_header.split(' ')[1]
+            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            user_email = payload.get("sub")
+        except Exception as e:
+            return jsonify({'error': str(e)}), 403
+        return f(user_email, *args, **kwargs)
+    return decorator
 
 # ------------------ REGISTRO USUÁRIO ------------------
 @routes.route("/register", methods=["POST"])
@@ -71,7 +89,7 @@ def login():
 
     token = jwt.encode({
         "sub": email,
-        "exp": datetime.utcnow() + timedelta(minutes=15)
+        "exp": datetime.utcnow() + timedelta(minutes=60)
     }, SECRET_KEY, algorithm="HS256")
 
     card_resp = cards_table.scan(FilterExpression=Attr('emailContato').eq(email))
@@ -177,18 +195,23 @@ def get_card(card_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ------------------ UPDATE CARD ------------------
+# ------------------ UPDATE CARD (protegido) ------------------
 @routes.route("/card/<card_id>", methods=["PUT"])
-def update_card(card_id):
+@token_required
+def update_card(user_email, card_id):
     try:
+        response = cards_table.get_item(Key={"card_id": card_id})
+        card = response.get("Item")
+        if not card:
+            return jsonify({"error": "Cartão não encontrado"}), 404
+
+        # Protege: só dono pode editar
+        if card.get("emailContato") != user_email:
+            return jsonify({"error": "Acesso negado: você não é o dono deste cartão."}), 403
+
         if request.content_type and request.content_type.startswith("multipart/form-data"):
             form = request.form
             files = request.files
-
-            response = cards_table.get_item(Key={"card_id": card_id})
-            card = response.get("Item")
-            if not card:
-                return jsonify({"error": "Cartão não encontrado"}), 404
 
             campos_editaveis = ["nome", "biografia", "empresa", "whatsapp", "emailContato", "instagram", "linkedin", "site", "chave_pix"]
             for campo in campos_editaveis:
@@ -216,10 +239,6 @@ def update_card(card_id):
         else:
             # Fallback para JSON (igual antes)
             data = request.json
-            response = cards_table.get_item(Key={"card_id": card_id})
-            card = response.get("Item")
-            if not card:
-                return jsonify({"error": "Cartão não encontrado"}), 404
 
             campos_editaveis = ["nome", "biografia", "empresa", "whatsapp", "emailContato", "instagram", "linkedin", "site", "chave_pix", "foto_perfil", "galeria"]
             for campo in campos_editaveis:
@@ -232,14 +251,19 @@ def update_card(card_id):
         print("Erro ao atualizar cartão:", e)
         return jsonify({"error": str(e)}), 500
 
-# ------------------ DELETE CARD ------------------
+# ------------------ DELETE CARD (protegido) ------------------
 @routes.route("/card/<card_id>", methods=["DELETE"])
-def delete_card(card_id):
+@token_required
+def delete_card(user_email, card_id):
     try:
         response = cards_table.get_item(Key={"card_id": card_id})
         card = response.get("Item")
         if not card:
             return jsonify({"error": "Cartão não encontrado"}), 404
+
+        # Protege: só dono pode excluir
+        if card.get("emailContato") != user_email:
+            return jsonify({"error": "Acesso negado: você não é o dono deste cartão."}), 403
 
         cards_table.delete_item(Key={"card_id": card_id})
         return jsonify({"message": "Cartão excluído com sucesso"}), 200
@@ -253,24 +277,10 @@ def servir_arquivo(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 # ------------------ SEGREDO (PROTEGIDO) ------------------
-def token_required(f):
-    from functools import wraps
-    def decorator(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            return jsonify({'error': 'Token ausente'}), 401
-        try:
-            token = auth_header.split(' ')[1]
-            jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-        except Exception as e:
-            return jsonify({'error': str(e)}), 403
-        return f(*args, **kwargs)
-    return wraps(f)(decorator)
-
 @routes.route("/segredo", methods=["GET"])
 @token_required
-def segredo():
-    return jsonify({"mensagem": "Você tem acesso autorizado"}), 200
+def segredo(user_email):
+    return jsonify({"mensagem": f"Você tem acesso autorizado como {user_email}"}), 200
 
 # ------------------ DEBUG DYNAMO (opcional) ------------------
 @routes.route("/debug-dynamo", methods=["GET"])
