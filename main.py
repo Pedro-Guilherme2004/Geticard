@@ -5,10 +5,12 @@ from app.routes import routes
 import os
 
 app = Flask(__name__)
-CORS(app, origins=[
-    "https://frontend-s52u.vercel.app",
-    "https://frontend-8zw6.onrender.com"
-])
+CORS(app,
+     origins=["https://frontend-s52u.vercel.app"],
+     supports_credentials=True,
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+)
 
 # Rota para servir uploads:
 @app.route("/uploads/<path:filename>")
