@@ -20,18 +20,18 @@ CORS(
             "origins": ALLOWED_ORIGINS,
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization"],
-            # deixe False se você NÃO usa cookies/sessão no navegador
+            
             "supports_credentials": False,
             "max_age": 86400,   # cache do preflight (opcional)
         }
     },
 )
 
-# REGISTRA SUAS ROTAS
+# REGISTRA AS ROTAS
 from app.routes import routes
 app.register_blueprint(routes)
 
-# Servir uploads (mantém como está)
+# Servir uploads
 @app.route("/uploads/<path:filename>")
 def servir_arquivo(filename):
     return send_from_directory("uploads", filename)
