@@ -5,7 +5,7 @@ from app.routes import routes
 app = Flask(__name__)
 CORS(
     app,
-    origins=["https://frontend-sigma-ashen-23.vercel.app/"],
+    origins=["https://frontend-git-main-pedros-projects-9d138c0b.vercel.app/"],
     supports_credentials=True,
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
